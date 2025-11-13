@@ -1,0 +1,726 @@
+-- AdminAllInOne.lua (LocalScript)
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local workspace = game:GetService("Workspace")
+
+local player = Players.LocalPlayer
+
+-- =================== Settings ===================
+local programRunning = true
+local livesFolderName = "Lives"
+local targetMonsters = {
+    "Lost Rider Lv.1","Armed Lost Rider Lv.5","Dragon User Lv.7",
+    "Crab User Lv.10","Bat User Lv.12","Bull User Lv.15",
+    "Foundation Soldier Lv.16","Cobra User Lv.20","Manta User Lv.25",
+    "Swan User Lv.30","Zebra Monster Lv.35","Dark Dragon User Lv.40",
+    "Gazelle User Lv.45","Violent Dragoon Lv.50","Shark Overloaded Lv.55",
+    "Shark User Lv.60","Foundation Soldier Lv.64","Timeless Goon Lv.70",
+    "Captain Goon Lv.75"
+}
+
+local selectedMonsters = {}
+for _, m in ipairs(targetMonsters) do selectedMonsters[m] = true end
+
+local state = {
+    autoFarm=false, autoFarmInterval=0.1,
+    speedEnabled=false, speedValue=16,
+    jumpEnabled=false, jumpValue=50,
+    godEnabled=false,
+    flyEnabled=false,
+    lockPos=false,
+    afkEnabled=false
+}
+
+local bp,bv,bg
+
+-- Add VirtualUser for AFK handling
+local vu = game:GetService("VirtualUser")
+player.Idled:Connect(function()
+    if state.afkEnabled then
+        pcall(function()
+            vu:CaptureController()
+            vu:ClickButton2(Vector2.new(0,0))
+        end)
+    end
+end)
+
+-- =================== Helper Functions ===================
+local function getChar() return player.Character or player.CharacterAdded:Wait() end
+local function getHRP() return getChar():FindFirstChild("HumanoidRootPart") end
+
+local function getNearbyMonsters()
+    local mobs = {}
+    local livesFolder = workspace:FindFirstChild(livesFolderName)
+    if livesFolder then
+        for _, mob in ipairs(livesFolder:GetChildren()) do
+            if selectedMonsters[mob.Name] and mob:FindFirstChild("HumanoidRootPart") then
+                table.insert(mobs, mob)
+            end
+        end
+    end
+    local hrp = getHRP()
+    if hrp then
+        table.sort(mobs,function(a,b)
+            return (hrp.Position - a.HumanoidRootPart.Position).Magnitude < (hrp.Position - b.HumanoidRootPart.Position).Magnitude
+        end)
+    end
+    return mobs
+end
+
+-- =================== AutoFarm ===================
+spawn(function()
+    while programRunning do
+        if state.autoFarm then
+            local char = getChar()
+            local event = char:FindFirstChild("PlayerHandler") and char.PlayerHandler:FindFirstChild("HandlerEvent")
+            if event then
+                local mobs = getNearbyMonsters()
+                if #mobs > 0 then
+                    local target = mobs[1]
+                    local thrp = target:FindFirstChild("HumanoidRootPart")
+                    if thrp then
+                        local backDistance = 3
+                        local backPos = thrp.Position - thrp.CFrame.LookVector * backDistance
+                        local hrp = getHRP()
+                        if hrp then
+                            pcall(function()
+                                hrp.CFrame = CFrame.new(backPos, Vector3.new(thrp.Position.X, backPos.Y, thrp.Position.Z))
+                            end)
+                        end
+                        wait(0.05)
+                        while programRunning and state.autoFarm and target.Parent and target:FindFirstChild("Humanoid") and target.Humanoid.Health > 0 do
+                            local hrp2 = getHRP()
+                            local thrp2 = target:FindFirstChild("HumanoidRootPart")
+                            if not (hrp2 and thrp2) then break end
+                            pcall(function()
+                                local desired = thrp2.Position - thrp2.CFrame.LookVector * backDistance
+                                hrp2.CFrame = CFrame.new(desired, Vector3.new(thrp2.Position.X, desired.Y, thrp2.Position.Z))
+                            end)
+                            pcall(function()
+                                local args = {{CombatAction=true, LightAttack=true, MouseData=thrp2.CFrame}}
+                                event:FireServer(unpack(args))
+                            end)
+                            wait(state.autoFarmInterval)
+                        end
+                    end
+                end
+            end
+        end
+        wait(0.1)
+    end
+end)
+
+-- =================== Physics ===================
+local function ensureBP()
+    local hrp = getHRP()
+    if hrp and (not bp or not bp.Parent) then
+        bp = Instance.new("BodyPosition")
+        bp.MaxForce = Vector3.new(1e5,1e5,1e5)
+        bp.P = 1e5
+        bp.D = 1e4
+        bp.Position = hrp.Position
+        bp.Parent = hrp
+    end
+end
+local function destroyBP() if bp then bp:Destroy() bp=nil end end
+local function ensureFlyParts()
+    local hrp = getHRP()
+    if hrp then
+        if not bv or not bv.Parent then
+            bv = Instance.new("BodyVelocity")
+            bv.MaxForce = Vector3.new(1e5,1e5,1e5)
+            bv.Velocity = Vector3.new(0,0,0)
+            bv.Parent = hrp
+        end
+        if not bg or not bg.Parent then
+            bg = Instance.new("BodyGyro")
+            bg.MaxTorque = Vector3.new(1e5,1e5,1e5)
+            bg.CFrame = hrp.CFrame
+            bg.Parent = hrp
+        end
+    end
+end
+local function destroyFlyParts()
+    if bv then bv:Destroy() end
+    if bg then bg:Destroy() end
+    bv,bg=nil,nil
+end
+
+-- =================== Status Loops ===================
+spawn(function()
+    while programRunning do
+        local char = getChar()
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.WalkSpeed = state.speedEnabled and state.speedValue or (state.lockPos and 0 or 16)
+            humanoid.JumpPower = state.jumpEnabled and state.jumpValue or 50
+            if state.godEnabled then humanoid.Health = humanoid.MaxHealth end
+        end
+        local hrp = getHRP()
+        if state.flyEnabled and hrp then
+            ensureFlyParts()
+            local mv = Vector3.new()
+            local cam = workspace.CurrentCamera.CFrame
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then mv = mv + cam.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then mv = mv - cam.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then mv = mv - cam.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then mv = mv + cam.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then mv = mv + Vector3.new(0,1,0) end
+            if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then mv = mv - Vector3.new(0,1,0) end
+            bv.Velocity = mv.Magnitude>0 and mv.Unit*state.speedValue or Vector3.new(0,0,0)
+            bg.CFrame = cam
+        else destroyFlyParts() end
+        if state.lockPos and hrp then ensureBP() bp.Position = hrp.Position else destroyBP() end
+        wait(0.05)
+    end
+end)
+
+-- =================== GUI (Rebuilt: modern layout) ===================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "ทดสอบโปร_Modern"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+-- Main container
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "Main"
+mainFrame.Size = UDim2.new(0,420,0,420)
+mainFrame.Position = UDim2.new(0,50,0,50)
+mainFrame.BackgroundColor3 = Color3.fromRGB(24,24,24)
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
+
+local mainCorner = Instance.new("UICorner", mainFrame); mainCorner.CornerRadius = UDim.new(0,12)
+local mainStroke = Instance.new("UIStroke", mainFrame); mainStroke.Color = Color3.fromRGB(40,40,40); mainStroke.Thickness = 1
+
+-- Top bar
+local topBar = Instance.new("Frame", mainFrame)
+topBar.Size = UDim2.new(1,0,0,48)
+topBar.Position = UDim2.new(0,0,0,0)
+topBar.BackgroundTransparency = 1
+
+local title = Instance.new("TextLabel", topBar)
+title.Size = UDim2.new(1,-120,1,0)
+title.Position = UDim2.new(0,12,0,0)
+title.BackgroundTransparency = 1
+title.Text = "AdminAllInOne"
+title.TextColor3 = Color3.fromRGB(240,240,240)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 18
+title.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Close & Minimize
+local btnClose = Instance.new("TextButton", topBar)
+btnClose.Size = UDim2.new(0,28,0,28); btnClose.Position = UDim2.new(1,-36,0,10)
+btnClose.Text = "✕"; btnClose.Font = Enum.Font.SourceSansBold; btnClose.TextSize = 18
+btnClose.BackgroundColor3 = Color3.fromRGB(200,60,60); btnClose.TextColor3 = Color3.fromRGB(255,255,255)
+local btnCloseCorner = Instance.new("UICorner", btnClose); btnCloseCorner.CornerRadius = UDim.new(0,6)
+
+local btnMin = Instance.new("TextButton", topBar)
+btnMin.Size = UDim2.new(0,28,0,28); btnMin.Position = UDim2.new(1,-72,0,10)
+btnMin.Text = "—"; btnMin.Font = Enum.Font.SourceSansBold; btnMin.TextSize = 18
+btnMin.BackgroundColor3 = Color3.fromRGB(70,70,70); btnMin.TextColor3 = Color3.fromRGB(255,255,255)
+local btnMinCorner = Instance.new("UICorner", btnMin); btnMinCorner.CornerRadius = UDim.new(0,6)
+
+
+-- ขนาดปุ่ม
+local rBtnSize = 60
+local closeBtnSize = 36
+local minimized = false
+
+-- สร้างปุ่ม R
+local rBtn = Instance.new("TextButton")
+rBtn.Size = UDim2.new(0,rBtnSize,0,rBtnSize)
+rBtn.Position = UDim2.new(0,50,0,100)
+rBtn.BackgroundColor3 = Color3.fromRGB(70,70,70)
+rBtn.TextColor3 = Color3.fromRGB(255,255,255)
+rBtn.Text = "R"
+rBtn.Font = Enum.Font.GothamBold
+rBtn.TextSize = 28
+rBtn.Visible = false
+rBtn.Parent = screenGui
+local rCorner = Instance.new("UICorner", rBtn)
+rCorner.CornerRadius = UDim.new(0,rBtnSize/2)
+
+-- สร้างปุ่ม Close เป็น ImageButton พร้อมไอคอน ✕
+local closeBtn = Instance.new("ImageButton")
+closeBtn.Size = UDim2.new(0,closeBtnSize,0,closeBtnSize)
+closeBtn.Position = UDim2.new(0,rBtn.Position.X.Offset + rBtnSize + 10,0,rBtn.Position.Y.Offset + (rBtnSize - closeBtnSize)/2)
+closeBtn.BackgroundColor3 = Color3.fromRGB(200,60,60)
+closeBtn.Image = "rbxassetid://13736125229" -- ไอคอน ✕ (ปรับ assetId ตามต้องการ)
+closeBtn.ScaleType = Enum.ScaleType.Fit
+closeBtn.Visible = false
+closeBtn.Parent = screenGui
+local closeCorner = Instance.new("UICorner", closeBtn)
+closeCorner.CornerRadius = UDim.new(0,closeBtnSize/2)
+
+-- ================== กล่องยืนยัน ==================
+local confirmFrame = Instance.new("Frame")
+confirmFrame.Size = UDim2.new(0,300,0,120)
+confirmFrame.Position = UDim2.new(0.5,-150,0.5,-60)
+confirmFrame.BackgroundColor3 = Color3.fromRGB(30,30,30)
+confirmFrame.BorderSizePixel = 0
+confirmFrame.Visible = false
+confirmFrame.Parent = screenGui
+local confirmCorner = Instance.new("UICorner", confirmFrame); confirmCorner.CornerRadius = UDim.new(0,12)
+
+local confirmText = Instance.new("TextLabel", confirmFrame)
+confirmText.Size = UDim2.new(1,0,0,60)
+confirmText.Position = UDim2.new(0,0,0,0)
+confirmText.BackgroundTransparency = 1
+confirmText.Text = "คุณต้องการปิดการใช้งานใช่มั้ย?"
+confirmText.Font = Enum.Font.GothamBold
+confirmText.TextSize = 16
+confirmText.TextColor3 = Color3.fromRGB(255,255,255)
+confirmText.TextWrapped = true
+confirmText.TextYAlignment = Enum.TextYAlignment.Center
+
+local yesBtn = Instance.new("TextButton", confirmFrame)
+yesBtn.Size = UDim2.new(0,100,0,36)
+yesBtn.Position = UDim2.new(0.25,-50,1,-50)
+yesBtn.Text = "Yes"
+yesBtn.Font = Enum.Font.GothamBold
+yesBtn.TextSize = 16
+yesBtn.BackgroundColor3 = Color3.fromRGB(60,120,60)
+yesBtn.TextColor3 = Color3.fromRGB(255,255,255)
+local yesCorner = Instance.new("UICorner", yesBtn); yesCorner.CornerRadius = UDim.new(0,6)
+
+local noBtn = Instance.new("TextButton", confirmFrame)
+noBtn.Size = UDim2.new(0,100,0,36)
+noBtn.Position = UDim2.new(0.75,-50,1,-50)
+noBtn.Text = "No"
+noBtn.Font = Enum.Font.GothamBold
+noBtn.TextSize = 16
+noBtn.BackgroundColor3 = Color3.fromRGB(120,60,60)
+noBtn.TextColor3 = Color3.fromRGB(255,255,255)
+local noCorner = Instance.new("UICorner", noBtn); noCorner.CornerRadius = UDim.new(0,6)
+
+-- ================== Logic ย่อ/ขยาย ==================
+btnMin.MouseButton1Click:Connect(function()
+    if not minimized then
+        minimized = true
+        mainFrame.Visible = false
+        rBtn.Visible = true
+        closeBtn.Visible = true
+    end
+end)
+
+rBtn.MouseButton1Click:Connect(function()
+    if minimized then
+        minimized = false
+        mainFrame.Visible = true
+        rBtn.Visible = false
+        closeBtn.Visible = false
+    end
+end)
+
+-- ================== Logic ปุ่ม Close ==================
+closeBtn.MouseButton1Click:Connect(function()
+    confirmFrame.Visible = true
+end)
+
+yesBtn.MouseButton1Click:Connect(function()
+    programRunning = false
+    mainFrame:Destroy()
+    rBtn:Destroy()
+    closeBtn:Destroy()
+    confirmFrame:Destroy()
+end)
+
+noBtn.MouseButton1Click:Connect(function()
+    confirmFrame.Visible = false
+end)
+
+-- ================== ระบบลากปุ่ม R + Close ==================
+local dragging = false
+local dragInput, dragStart, startPos
+
+rBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = rBtn.Position
+
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+rBtn.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        dragInput = input
+    end
+end)
+
+game:GetService("UserInputService").InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        local newX = startPos.X.Offset + delta.X
+        local newY = startPos.Y.Offset + delta.Y
+
+        local vs = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920,1080)
+        newX = math.clamp(newX, 0, vs.X - rBtn.AbsoluteSize.X)
+        newY = math.clamp(newY, 0, vs.Y - rBtn.AbsoluteSize.Y)
+
+        -- ขยับทั้ง R และ Close ให้เคียงข้างกัน
+        rBtn.Position = UDim2.new(0,newX,0,newY)
+        closeBtn.Position = UDim2.new(0,newX + rBtnSize + 10,0,newY + (rBtnSize - closeBtnSize)/2)
+    end
+end)
+
+
+-- หลังจากสร้าง mainFrame (ใหม่) ให้ตั้งการตัดทอน และเพิ่มระบบลากที่ผูกกับ topBar
+mainFrame.ClipsDescendants = true
+
+-- New: drag by topBar, constrained to viewport
+do
+	local dragging = false
+	local dragStart = Vector2.new(0,0)
+	local startPos = UDim2.new(0,0,0,0)
+
+	topBar.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = true
+			dragStart = input.Position
+			startPos = mainFrame.Position
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					dragging = false
+				end
+			end)
+		end
+	end)
+
+	topBar.InputChanged:Connect(function(input)
+		if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+			local delta = input.Position - dragStart
+			local newX = startPos.X.Offset + delta.X
+			local newY = startPos.Y.Offset + delta.Y
+
+			-- clamp to viewport so frame doesn't go off-screen
+			local vs = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920,1080)
+			local fw = mainFrame.AbsoluteSize.X
+			local fh = mainFrame.AbsoluteSize.Y
+			newX = math.clamp(newX, 0, math.max(0, vs.X - fw))
+			newY = math.clamp(newY, 0, math.max(0, vs.Y - fh))
+
+			mainFrame.Position = UDim2.new(0, newX, 0, newY)
+		end
+	end)
+end
+
+-- Left sidebar
+local side = Instance.new("Frame", mainFrame)
+side.Size = UDim2.new(0,120,1,-48)
+side.Position = UDim2.new(0,0,0,48)
+side.BackgroundTransparency = 1
+
+local sideBg = Instance.new("Frame", side)
+sideBg.Size = UDim2.new(1, -12, 1, -12)
+sideBg.Position = UDim2.new(0,6,0,6)
+sideBg.BackgroundColor3 = Color3.fromRGB(30,30,30)
+sideBg.BorderSizePixel = 0
+local sideCorner = Instance.new("UICorner", sideBg); sideCorner.CornerRadius = UDim.new(0,10)
+
+local sideLayout = Instance.new("UIListLayout", sideBg)
+sideLayout.Padding = UDim.new(0,8)
+sideLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+sideLayout.SortOrder = Enum.SortOrder.LayoutOrder
+sideLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+
+-- Content area
+local content = Instance.new("Frame", mainFrame)
+content.Size = UDim2.new(1,-132,1,-64)
+content.Position = UDim2.new(0,132,0,48)
+content.BackgroundTransparency = 1
+local contentBg = Instance.new("Frame", content)
+contentBg.Size = UDim2.new(1,0,1,0)
+contentBg.BackgroundColor3 = Color3.fromRGB(16,16,16)
+local contentCorner = Instance.new("UICorner", contentBg); contentCorner.CornerRadius = UDim.new(0,10)
+local contentStroke = Instance.new("UIStroke", contentBg); contentStroke.Color = Color3.fromRGB(40,40,40)
+
+-- Tab buttons (left)
+local function makeTabBtn(text, order)
+    local b = Instance.new("TextButton", sideBg)
+    b.Size = UDim2.new(1,-16,0,40)
+    b.BackgroundColor3 = Color3.fromRGB(20,20,20)
+    b.Text = text
+    b.TextColor3 = Color3.fromRGB(220,220,220)
+    b.Font = Enum.Font.Gotham
+    b.TextSize = 14
+    b.AutoButtonColor = false
+    b.LayoutOrder = order
+    local c = Instance.new("UICorner", b); c.CornerRadius = UDim.new(0,8)
+    local s = Instance.new("UIStroke", b); s.Color = Color3.fromRGB(35,35,35)
+    return b
+end
+
+local tabFarmBtn = makeTabBtn("Farm", 1)
+local tabOtherBtn = makeTabBtn("Other", 2)
+local tabMineBtn = makeTabBtn("Mine", 3)
+
+-- Content frames
+local farmContent = Instance.new("Frame", contentBg); farmContent.Size = UDim2.new(1,0,1,0); farmContent.Visible = true; farmContent.BackgroundTransparency = 1
+local otherContent = Instance.new("Frame", contentBg); otherContent.Size = UDim2.new(1,0,1,0); otherContent.Visible = false; otherContent.BackgroundTransparency = 1
+local mineContent = Instance.new("Frame", contentBg); mineContent.Size = UDim2.new(1,0,1,0); mineContent.Visible = false; mineContent.BackgroundTransparency = 1
+
+local function setContent(which)
+    farmContent.Visible = (which == "Farm")
+    otherContent.Visible = (which == "Other")
+    mineContent.Visible = (which == "Mine")
+    -- highlight
+    tabFarmBtn.BackgroundColor3 = which=="Farm" and Color3.fromRGB(40,40,40) or Color3.fromRGB(20,20,20)
+    tabOtherBtn.BackgroundColor3 = which=="Other" and Color3.fromRGB(40,40,40) or Color3.fromRGB(20,20,20)
+    tabMineBtn.BackgroundColor3 = which=="Mine" and Color3.fromRGB(40,40,40) or Color3.fromRGB(20,20,20)
+end
+
+tabFarmBtn.MouseButton1Click:Connect(function() setContent("Farm") end)
+tabOtherBtn.MouseButton1Click:Connect(function() setContent("Other") end)
+tabMineBtn.MouseButton1Click:Connect(function() setContent("Mine") end)
+
+-- ========== Farm content (modern) ==========
+local farmLayout = Instance.new("UIListLayout", farmContent)
+farmLayout.Padding = UDim.new(0,8)
+farmLayout.SortOrder = Enum.SortOrder.LayoutOrder
+local farmTitle = Instance.new("TextLabel", farmContent)
+farmTitle.Size = UDim2.new(1, -24, 0, 28); farmTitle.Position = UDim2.new(0,12,0,12)
+farmTitle.BackgroundTransparency = 1; farmTitle.Text = "Farm"; farmTitle.TextColor3 = Color3.fromRGB(230,230,230)
+farmTitle.Font = Enum.Font.GothamBold; farmTitle.TextSize = 16; farmTitle.TextXAlignment = Enum.TextXAlignment.Left
+
+-- AutoFarm toggle (exposed as autoBtn to keep compatibility)
+local autoBtn = Instance.new("TextButton", farmContent)
+autoBtn.Size = UDim2.new(0,160,0,36)
+autoBtn.Position = UDim2.new(0,12,0,48)
+autoBtn.Text = "AutoFarm: OFF"
+autoBtn.Font = Enum.Font.Gotham
+autoBtn.TextSize = 14
+autoBtn.BackgroundColor3 = Color3.fromRGB(50,50,50)
+autoBtn.TextColor3 = Color3.fromRGB(255,255,255)
+local autoCorner = Instance.new("UICorner", autoBtn); autoCorner.CornerRadius = UDim.new(0,8)
+
+local autoIndicator = Instance.new("TextLabel", farmContent)
+autoIndicator.Size = UDim2.new(0,140,0,36)
+autoIndicator.Position = UDim2.new(0,184,0,48)
+autoIndicator.BackgroundTransparency = 1
+autoIndicator.Text = "OFF"
+autoIndicator.Font = Enum.Font.GothamBold
+autoIndicator.TextSize = 14
+autoIndicator.TextColor3 = Color3.fromRGB(255,80,80)
+
+-- Monster list (scroll)
+local scrollFrame = Instance.new("ScrollingFrame", farmContent)
+scrollFrame.Size = UDim2.new(1, -24, 0, 220)
+scrollFrame.Position = UDim2.new(0,12,0,96)
+scrollFrame.BackgroundColor3 = Color3.fromRGB(18,18,18)
+scrollFrame.BorderSizePixel = 0
+local scrollCorner = Instance.new("UICorner", scrollFrame); scrollCorner.CornerRadius = UDim.new(0,8)
+local listLayout = Instance.new("UIListLayout", scrollFrame)
+listLayout.Padding = UDim.new(0,6)
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+scrollFrame.CanvasSize = UDim2.new(0,0,0,#targetMonsters*38)
+
+local monsterButtons = {}
+for i,mName in ipairs(targetMonsters) do
+    local btn = Instance.new("TextButton", scrollFrame)
+    btn.Size = UDim2.new(1, -12, 0, 34)
+    btn.Position = UDim2.new(0,6,0,(i-1)*38)
+    btn.BackgroundColor3 = Color3.fromRGB(36,36,36)
+    btn.TextColor3 = Color3.fromRGB(230,230,230)
+    btn.Text = "[✓] "..mName
+    btn.Font = Enum.Font.Gotham
+    btn.TextSize = 14
+    local c = Instance.new("UICorner", btn); c.CornerRadius = UDim.new(0,6)
+    btn.MouseButton1Click:Connect(function()
+        selectedMonsters[mName] = not selectedMonsters[mName]
+        btn.Text = (selectedMonsters[mName] and "[✓] " or "[✗] ")..mName
+    end)
+    table.insert(monsterButtons, btn)
+end
+
+local quickAll = Instance.new("TextButton", farmContent)
+quickAll.Size = UDim2.new(0,80,0,32)
+quickAll.Position = UDim2.new(0,12,0,330)
+quickAll.Text = "All"
+local quickNone = Instance.new("TextButton", farmContent)
+quickNone.Size = UDim2.new(0,80,0,32)
+quickNone.Position = UDim2.new(0,100,0,330)
+quickNone.Text = "None"
+
+quickAll.BackgroundColor3 = Color3.fromRGB(60,120,60); quickNone.BackgroundColor3 = Color3.fromRGB(120,60,60)
+local qaCorner = Instance.new("UICorner", quickAll); qaCorner.CornerRadius = UDim.new(0,6)
+local qnCorner = Instance.new("UICorner", quickNone); qnCorner.CornerRadius = UDim.new(0,6)
+
+quickAll.MouseButton1Click:Connect(function()
+    for i,mName in ipairs(targetMonsters) do
+        selectedMonsters[mName] = true
+        monsterButtons[i].Text = "[✓] "..mName
+    end
+end)
+quickNone.MouseButton1Click:Connect(function()
+    for i,mName in ipairs(targetMonsters) do
+        selectedMonsters[mName] = false
+        monsterButtons[i].Text = "[✗] "..mName
+    end
+end)
+
+-- ========== Other content ==========
+local otherLayout = Instance.new("UIListLayout", otherContent)
+otherLayout.Padding = UDim.new(0,12)
+
+local otherTitle = Instance.new("TextLabel", otherContent)
+otherTitle.Size = UDim2.new(1,-24,0,28); otherTitle.Position = UDim2.new(0,12,0,12)
+otherTitle.BackgroundTransparency = 1; otherTitle.Text = "Other"; otherTitle.TextColor3 = Color3.fromRGB(230,230,230)
+otherTitle.Font = Enum.Font.GothamBold; otherTitle.TextSize = 16; otherTitle.TextXAlignment = Enum.TextXAlignment.Left
+
+-- helper for toggle buttons (keeps variable naming)
+local function makeToggle(name, posY)
+    local btn = Instance.new("TextButton", otherContent)
+    btn.Size = UDim2.new(0,160,0,36)
+    btn.Position = UDim2.new(0,12,0,posY)
+    btn.Text = name..": OFF"
+    btn.Font = Enum.Font.Gotham
+    btn.TextSize = 14
+    btn.BackgroundColor3 = Color3.fromRGB(50,50,50)
+    btn.TextColor3 = Color3.fromRGB(255,255,255)
+    local c = Instance.new("UICorner", btn); c.CornerRadius = UDim.new(0,8)
+    return btn
+end
+
+
+local lockBtn = makeToggle("LockPos", 240)
+
+-- AFK toggle
+local afkBtn = makeToggle("AFK", 288)
+state.afkEnabled = state.afkEnabled or false
+-- ================== Bind AFK Toggle ==================
+afkBtn.MouseButton1Click:Connect(function()
+    state.afkEnabled = not state.afkEnabled
+    afkBtn.Text = "AFK: " .. (state.afkEnabled and "ON" or "OFF")
+end)
+
+
+-- Optional: Loop AFK เพื่อความมั่นใจ
+spawn(function()
+    while programRunning do
+        if state.afkEnabled then
+            -- ส่ง Click เล็กๆ ทุก 50-60 วินาที
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new(0,0))
+        end
+        wait(55) -- ปรับได้ตามต้องการ
+    end
+end)
+
+
+
+-- ========== Mine content ==========
+local mineTitle = Instance.new("TextLabel", mineContent)
+mineTitle.Size = UDim2.new(1,-24,0,28); mineTitle.Position = UDim2.new(0,12,0,12)
+mineTitle.BackgroundTransparency = 1; mineTitle.Text = "Mine"; mineTitle.TextColor3 = Color3.fromRGB(230,230,230)
+mineTitle.Font = Enum.Font.GothamBold; mineTitle.TextSize = 16; mineTitle.TextXAlignment = Enum.TextXAlignment.Left
+
+local mineBtn = Instance.new("TextButton", mineContent)
+mineBtn.Size = UDim2.new(0,160,0,36)
+mineBtn.Position = UDim2.new(0,12,0,48)
+mineBtn.Text = "Auto Mine: OFF"
+mineBtn.Font = Enum.Font.Gotham
+mineBtn.TextSize = 14
+mineBtn.BackgroundColor3 = Color3.fromRGB(50,50,50)
+mineBtn.TextColor3 = Color3.fromRGB(255,255,255)
+local mineCorner = Instance.new("UICorner", mineBtn); mineCorner.CornerRadius = UDim.new(0,8)
+
+local mineStatus = Instance.new("TextLabel", mineContent)
+mineStatus.Size = UDim2.new(0,200,0,36)
+mineStatus.Position = UDim2.new(0,184,0,48)
+mineStatus.BackgroundTransparency = 1
+mineStatus.Text = "Auto Mine: OFF"
+mineStatus.Font = Enum.Font.Gotham
+mineStatus.TextSize = 14
+mineStatus.TextColor3 = Color3.fromRGB(200,200,200)
+
+-- Add: declare autoMine and bind mineBtn click to toggle it / update UI
+local autoMine = false
+mineBtn.MouseButton1Click:Connect(function()
+    autoMine = not autoMine
+    mineBtn.Text = autoMine and "Auto Mine: ON" or "Auto Mine: OFF"
+    mineStatus.Text = autoMine and "Auto Mine: ON" or "Auto Mine: OFF"
+end)
+
+-- =================== Buttons Functions ===================
+autoBtn.MouseButton1Click:Connect(function()
+    state.autoFarm=not state.autoFarm
+    autoBtn.Text=state.autoFarm and "AutoFarm: ON" or "AutoFarm: OFF"
+    autoIndicator.Text=state.autoFarm and "AutoFarm: ON" or "AutoFarm: OFF"
+    autoIndicator.TextColor3=state.autoFarm and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,0,0)
+end)
+
+
+lockBtn.MouseButton1Click:Connect(function()
+    state.lockPos=not state.lockPos
+    lockBtn.Text=state.lockPos and "LockPos: ON" or "LockPos: OFF"
+end)
+
+-- =================== Auto Mine Loop ===================
+spawn(function()
+    while programRunning do
+        if autoMine then
+            local hrp = getHRP()
+            local livesFolder = workspace:FindFirstChild(livesFolderName)
+            if hrp and livesFolder then
+                local miners = {}
+                for _, mob in ipairs(livesFolder:GetChildren()) do
+                    if mob.Name=="Miner Goon Lv.50" and mob:FindFirstChild("HumanoidRootPart") then
+                        table.insert(miners,mob)
+                    end
+                end
+                -- เรียงตามระยะทาง
+                table.sort(miners,function(a,b)
+                    return (hrp.Position - a.HumanoidRootPart.Position).Magnitude < (hrp.Position - b.HumanoidRootPart.Position).Magnitude
+                end)
+                -- เลือกแค่ 3 ตัวแรก
+                local targetMiners={}
+                for i=1,math.min(3,#miners) do table.insert(targetMiners,miners[i]) end
+                -- จัดมอนเรียงหน้า
+                local distance = 5
+                local spacing = 1.5
+                for i,mob in ipairs(targetMiners) do
+                    local mobHRP = mob:FindFirstChild("HumanoidRootPart")
+                    if mobHRP then
+                        mobHRP.Anchored=false
+                        local offset = Vector3.new((i-1)*spacing,0,0)
+                        mobHRP.CFrame = CFrame.new(hrp.Position + hrp.CFrame.LookVector * distance + offset)
+                    end
+                end
+                -- วาปตีเหมือน AutoFarm
+                for _, mob in ipairs(targetMiners) do
+                    local mobHRP = mob:FindFirstChild("HumanoidRootPart")
+                    local humanoid = mob:FindFirstChild("Humanoid")
+                    if mobHRP and humanoid and humanoid.Health>0 then
+                        local char = getChar()
+                        local event = char:FindFirstChild("PlayerHandler") and char.PlayerHandler:FindFirstChild("HandlerEvent")
+                        if event then
+                            local backDistance = 3
+                            local backPos = mobHRP.Position - mobHRP.CFrame.LookVector*backDistance
+                            pcall(function() hrp.CFrame=CFrame.new(backPos,Vector3.new(mobHRP.Position.X,backPos.Y,mobHRP.Position.Z)) end)
+                            wait(0.05)
+                            while programRunning and autoMine and mob.Parent and humanoid.Health>0 do
+                                local desired = mobHRP.Position - mobHRP.CFrame.LookVector*backDistance
+                                pcall(function() hrp.CFrame=CFrame.new(desired,Vector3.new(mobHRP.Position.X,desired.Y,mobHRP.Position.Z)) end)
+                                local args={{CombatAction=true,LightAttack=true,MouseData=mobHRP.CFrame}}
+                                pcall(function() event:FireServer(unpack(args)) end)
+                                wait(0.1)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        wait(0.1)
+    end
+end)
+
+print("AdminAllInOne loaded. GUI ใช้งานได้จริง!")
