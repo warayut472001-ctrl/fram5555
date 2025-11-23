@@ -1,5 +1,3 @@
-
-
 -- AdminAllInOne.lua v3.0 - AUTO LEVEL FARM ENHANCED!
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -79,6 +77,28 @@ local questDatabase = {
         questUIName = "No CAP!",
         questType = "kill",
         icon = "⚔️"
+    },
+    {
+        id = "quest_bullet_metal",
+        name = "The Bullet & Metal",
+        npcName = "ElementalResearcher",
+        npcPath = {"NPC", "ElementalResearcher"},
+        dialogueSteps = {"Hello!", "Yes, show me what you have", "The Bullet and Metal", "Start 'The Bullet and Metal'"},
+        monsters = {"Metal Man Lv.55", "Bullet Man Lv.55"},
+        questUIName = "The Bullet & Metal",
+        questType = "kill",
+        icon = "🔫"
+    },
+    {
+        id = "quest_fire_luna",
+        name = "The Fire & Luna",
+        npcName = "ElementalResearcher",
+        npcPath = {"NPC", "ElementalResearcher"},
+        dialogueSteps = {"Hello!", "Yes, show me what you have", "The Fire and Luna", "Start 'The Fire and Luna'"},
+        monsters = {"Luna Girl Lv.55", "Flare Man Lv.55"},
+        questUIName = "The Fire & Luna",
+        questType = "kill",
+        icon = "🔥"
     },
     {
         id = "quest_agito",
@@ -812,7 +832,7 @@ spawn(function()
     end
 end)
 
--- =================== AutoQuest Loop ===================
+-- =================== AutoQuest Loop (ULTRA STABLE!) ===================
 spawn(function()
     while programRunning do
         if state.autoQuest and state.selectedQuest then
@@ -821,36 +841,54 @@ spawn(function()
             if hrp then
                 local npc = getNPCFromPath(questData.npcPath)
                 if npc and npc:FindFirstChild("HumanoidRootPart") then
+                    -- ⚡ วาร์ปหา NPC (3 ครั้ง)
                     print("🚀 [Quest] วาร์ปไปหา NPC " .. questData.npcName)
-                    pcall(function()
-                        hrp.CFrame = npc.HumanoidRootPart.CFrame * CFrame.new(0, 0, 4)
-                    end)
-                    wait(1)
+                    local npcCFrame = npc.HumanoidRootPart.CFrame * CFrame.new(0, 0, 1.5)
                     
-                    clickNPC(npc)
-                    wait(1)
+                    for tpAttempt = 1, 3 do
+                        pcall(function()
+                            hrp.CFrame = npcCFrame
+                            hrp.Velocity = Vector3.new(0, 0, 0)
+                            hrp.RotVelocity = Vector3.new(0, 0, 0)
+                        end)
+                        wait(0.2)
+                    end
                     
+                    wait(0.5)
+                    
+                    -- ⚡ คลิก NPC หลายครั้ง
+                    print("🖱️ [Quest] คลิก NPC...")
+                    for clickAttempt = 1, 3 do
+                        clickNPC(npc)
+                        wait(0.3)
+                    end
+                    
+                    wait(0.5)
+                    
+                    print("💬 [Quest] คุยรับเควส...")
                     talkToNPC(questData)
-                    wait(2)
+                    wait(1.5)
                     
+                    -- ⚡ ตรวจสอบว่าได้เควสหรือยัง (เช็ค 10 ครั้ง)
                     local questReceived = false
-                    for i = 1, 5 do
+                    for i = 1, 10 do
                         if hasActiveQuest(questData) then
                             questReceived = true
                             print("✅ [Quest] รับเควส " .. questData.name .. " สำเร็จ!")
                             break
                         else
-                            wait(1)
+                            print("⏳ [Quest] รอรับเควส... (" .. i .. "/10)")
+                            wait(0.5)
                         end
                     end
                     
                     if not questReceived then
-                        print("❌ [Quest] ไม่ได้รับเควส - เริ่มใหม่")
-                        wait(3)
+                        print("❌ [Quest] ไม่ได้รับเควส - ลองใหม่อีกครั้ง!")
+                        wait(2)
                         continue
                     end
                     
-                    wait(1)
+                    wait(0.5)
                     
                     if questData.questType == "ancient_dungeon" then
                         print("\n🏛️ ============ เริ่มทำเควส Ancient Argument (Enhanced!) ============")
@@ -999,38 +1037,54 @@ spawn(function()
                                 wait(0.1)
                             end
                             if killedMobs[mobName] then
-                                wait(2)
+                                wait(1)
                             end
                         end
                     end
                     
-                    wait(2)
-                    print("📜 [Quest] กลับไปส่งเควสที่ NPC...")
-                    pcall(function()
-                        hrp.CFrame = npc.HumanoidRootPart.CFrame * CFrame.new(0, 0, 4)
-                    end)
                     wait(1.5)
                     
-                    submitQuest(questData, npc)
-                    wait(2)
+                    -- ⚡ วาร์ปกลับส่งเควส (3 ครั้ง)
+                    print("📜 [Quest] กลับไปส่งเควสที่ NPC...")
+                    local submitCFrame = npc.HumanoidRootPart.CFrame * CFrame.new(0, 0, 1.5)
                     
+                    for tpAttempt = 1, 3 do
+                        pcall(function()
+                            hrp = getHRP()
+                            if hrp then
+                                hrp.CFrame = submitCFrame
+                                hrp.Velocity = Vector3.new(0, 0, 0)
+                                hrp.RotVelocity = Vector3.new(0, 0, 0)
+                            end
+                        end)
+                        wait(0.2)
+                    end
+                    
+                    wait(0.5)
+                    
+                    print("📬 [Quest] ส่งเควส...")
+                    submitQuest(questData, npc)
+                    wait(1.5)
+                    
+                    -- ⚡ ตรวจสอบว่าส่งสำเร็จหรือยัง (เช็ค 10 ครั้ง)
                     local questSubmitted = false
-                    for i = 1, 5 do
+                    for i = 1, 10 do
                         if not hasActiveQuest(questData) then
                             questSubmitted = true
                             print("✅ [Quest] ส่งเควสสำเร็จ!")
                             break
                         else
-                            wait(1)
+                            print("⏳ [Quest] รอส่งเควส... (" .. i .. "/10)")
+                            wait(0.5)
                         end
                     end
                     
                     if questSubmitted then
                         print("✅ [Quest] รอบเสร็จ - เริ่มรอบใหม่...")
-                        wait(3)
-                    else
-                        print("⚠️ [Quest] เควสยังอยู่ - ลองอีกครั้ง...")
                         wait(2)
+                    else
+                        print("⚠️ [Quest] เควสยังอยู่ - ลองส่งอีกครั้ง...")
+                        wait(1.5)
                     end
                 end
             end
@@ -1132,7 +1186,7 @@ spawn(function()
     end
 end)
 
--- =================== Auto Event Halloween Loop ===================
+-- =================== Auto Event Halloween Loop (ลบ Currency Crate I) ===================
 spawn(function()
     while programRunning do
         if state.autoEvent then
@@ -1429,7 +1483,7 @@ spawn(function()
                 pcall(function() event:FireServer(unpack(args)) end)
             end
         end
-        wait(1)
+        wait(0.5)
     end
 end)
 
@@ -1463,20 +1517,50 @@ for _, skill in ipairs(skills) do
     end)
 end
 
--- =================== Auto Press X Loop ===================
+-- =================== Auto Press X Loop (Skill Version) ===================
 spawn(function()
+    local forms = {"Survive Bat", "Survive Cobra", "Survive Dragon"}
+    local index = 1
+
     while programRunning do
         if state.autoKeyX then
             pcall(function()
-                vu:CaptureController()
-                vu:SetKeyDown("x")
-                task.wait(0.05)
-                vu:SetKeyUp("x")
+                local player = game:GetService("Players").LocalPlayer
+                local character = player.Character
+
+                if character and character:FindFirstChild("PlayerHandler") then
+                    local handlerEvent = character.PlayerHandler:FindFirstChild("HandlerEvent")
+
+                    if handlerEvent then
+                        local mousePos = player:GetMouse().Hit
+
+                        -- เลือกฟอร์ม แบบสลับไปเรื่อยๆ
+                        local currentForm = forms[index]
+
+                        local args = {
+                            {
+                                Skill = true,
+                                FormHenshin = currentForm,
+                                Key = "X",
+                                MouseData = mousePos
+                            }
+                        }
+
+                        handlerEvent:FireServer(unpack(args))
+
+                        -- เปลี่ยนไปฟอร์มถัดไป
+                        index = index + 1
+                        if index > #forms then
+                            index = 1
+                        end
+                    end
+                end
             end)
         end
-        task.wait(0.15)
+        task.wait(0.5)
     end
 end)
+
 
 -- =================== AFK Loop ===================
 spawn(function()
@@ -2226,7 +2310,7 @@ questLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
     questContent.CanvasSize = UDim2.new(0, 0, 0, questLayout.AbsoluteContentSize.Y + 20)
 end)
 
--- Event Tab
+-- Event Tab (ไม่มี Currency Crate)
 local eventTitle = Instance.new("TextLabel", eventContent)
 eventTitle.Size = UDim2.new(1, 0, 0, 30)
 eventTitle.BackgroundTransparency = 1
@@ -2475,4 +2559,3 @@ end)
 btnNo.MouseButton1Click:Connect(function()
     confirmFrame.Visible = false
 end)
-
